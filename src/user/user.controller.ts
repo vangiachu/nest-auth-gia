@@ -14,6 +14,8 @@ import { JwtService } from '@nestjs/jwt';
 import { Response, Request } from 'express';
 import { TokenService } from './token.service';
 import { MoreThanOrEqual } from 'typeorm';
+import * as speakeasy from 'speakeasy';
+import { OAuth2Client } from 'google-auth-library';
 
 @Controller()
 export class UserController {
@@ -52,22 +54,70 @@ export class UserController {
       throw new BadRequestException('Invalid credentials');
     }
 
-    const accesToken = await this.jwtService.signAsync(
-      {
+    response.status(200);
+
+    if (user.tfa_secret) {
+      return {
         id: user.id,
-      },
+      };
+    }
+
+    const secret = speakeasy.generate({
+      name: 'My App',
+    });
+
+    return {
+      id: user.id,
+      secret: secret.ascii,
+      otpauth_url: secret.otpauth_url,
+    };
+  }
+
+  @Post('two-factor')
+  async twoFactor(
+    @Body('id') id: number,
+    @Body('code') code: string,
+    @Res({ passthrough: true }) response: Response,
+    @Body('secret') secret?: string,
+  ) {
+    const user = await this.userService.findOne({ id });
+
+    if (!user) {
+      throw new BadRequestException('Invalid Credentials');
+    }
+
+    if (!secret) {
+      secret = user.tfa_secret;
+    }
+
+    const verified = speakeasy.totp.verify({
+      secret,
+      encoding: 'ascii',
+      token: code,
+    });
+
+    if (!verified) {
+      throw new BadRequestException('Invalid Credentials');
+    }
+
+    if (user.tfa_secret === '') {
+      await this.userService.update(id, {
+        tfa_secret: secret,
+      });
+    }
+
+    const accesToken = await this.jwtService.signAsync(
+      { id },
       { expiresIn: '30s' },
     );
 
-    const refreshToken = await this.jwtService.signAsync({
-      id: user.id,
-    });
+    const refreshToken = await this.jwtService.signAsync({ id });
 
     const expired_at = new Date();
     expired_at.setDate(expired_at.getDate() + 7);
 
     await this.tokenService.save({
-      user_id: user.id,
+      user_id: id,
       token: refreshToken,
       expired_at,
     });
@@ -140,6 +190,63 @@ export class UserController {
 
     return {
       message: 'success',
+    };
+  }
+
+  @Post('google-auth')
+  async googleAuth(
+    @Body('token') token: string,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    const clientId =
+      '204431285224-ti2j9a86eupqhv8gcq5qbta9aaj3r82d.apps.googleusercontent.com';
+    const client = new OAuth2Client(clientId);
+    const ticket = await client.verifyIdToken({
+      idToken: token,
+      audience: clientId,
+    });
+
+    const googleUser = ticket.getPayload();
+
+    if (!googleUser) {
+      throw new UnauthorizedException();
+    }
+
+    let user = await this.userService.findOne({ email: googleUser.email });
+
+    if (!user) {
+      user = await this.userService.save({
+        first_name: googleUser.given_name,
+        last_name: googleUser.family_name,
+        email: googleUser.email,
+        password: await bcrypt.hash(token, 12),
+      });
+    }
+
+    const accesToken = await this.jwtService.signAsync(
+      { id: user.id },
+      { expiresIn: '30s' },
+    );
+
+    const refreshToken = await this.jwtService.signAsync({ id: user.id });
+
+    const expired_at = new Date();
+    expired_at.setDate(expired_at.getDate() + 7);
+
+    await this.tokenService.save({
+      user_id: user.id,
+      token: refreshToken,
+      expired_at,
+    });
+
+    response.status(200);
+    response.cookie('refresh_token', refreshToken, {
+      httpOnly: true,
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+    });
+
+    return {
+      token: accesToken,
     };
   }
 }
