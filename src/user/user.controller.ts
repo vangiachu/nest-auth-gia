@@ -62,8 +62,8 @@ export class UserController {
       };
     }
 
-    const secret = speakeasy.generate({
-      name: 'My App',
+    const secret = speakeasy.generateSecret({
+      name: 'OAuth-Google-Gia',
     });
 
     return {
@@ -108,7 +108,7 @@ export class UserController {
 
     const accesToken = await this.jwtService.signAsync(
       { id },
-      { expiresIn: '30s' },
+      { expiresIn: '1d' },
     );
 
     const refreshToken = await this.jwtService.signAsync({ id });
@@ -169,7 +169,7 @@ export class UserController {
 
       const accessToken = await this.jwtService.signAsync(
         { id },
-        { expiresIn: '30s' },
+        { expiresIn: '1d' },
       );
 
       response.status(200);
@@ -199,7 +199,7 @@ export class UserController {
     @Res({ passthrough: true }) response: Response,
   ) {
     const clientId =
-      '204431285224-ti2j9a86eupqhv8gcq5qbta9aaj3r82d.apps.googleusercontent.com';
+      '204431285224-irrli1v6vi2fju8fm5nbji380pqs29l1.apps.googleusercontent.com';
     const client = new OAuth2Client(clientId);
     const ticket = await client.verifyIdToken({
       idToken: token,
@@ -225,7 +225,7 @@ export class UserController {
 
     const accesToken = await this.jwtService.signAsync(
       { id: user.id },
-      { expiresIn: '30s' },
+      { expiresIn: '1d' },
     );
 
     const refreshToken = await this.jwtService.signAsync({ id: user.id });
